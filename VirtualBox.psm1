@@ -201,6 +201,59 @@ function Open-VirtualBoxVMConsole
     return Start-VirtualBoxVM -Name $Name -ShowConsole
 }
 
+function Invoke-VirtualBoxVMProcess
+{
+    param(
+        [Parameter(Position=0,ParameterSetName="Name")]
+        [string]$Name,
+        [Parameter(ParameterSetName="Uuid")]
+        [string]$Uuid,
+        [Parameter(Position=0,ParameterSetName="VirtualBoxVM",ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [VirtualBoxVM]$VirtualBoxVM,
+        [Parameter(Position=1,Mandatory=$true)]
+        [string]$PathToExecutable,
+        [Parameter(Position=2)]
+        [string[]]$Arguments,
+        [Parameter(Position=3)]
+        [pscredential]$Credential,
+        [Parameter(Mandatory=$false)]
+        [Switch]$AsJob
+    )
+
+    if ($VirtualBoxVM) { $Name = $VirtualBoxVM.Name }
+    if ($Uuid) { $Name = $Uuid }
+    
+    if (!$Credential) {
+        $sUserName = $env:USERNAME
+        $secPassword = Read-Host "Password for [$sUserName]" -AsSecureString
+        $Credential = New-Object pscredential($sUserName,$secPassword)
+    }#if
+
+    $secPassword = $Credential.Password
+    $usPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPassword))
+
+    if ($AsJob) {
+
+        Start-Job {
+
+            param(
+                [string]$Name,
+                [string]$PathToExecutable,
+                [string[]]$Arguments,
+                [pscredential]$Credential                
+            )
+
+            Invoke-VirtualBoxVMProcess -Name $Name -PathToExecutable $PathToExecutable -Arguments $Arguments -Credential $Credential
+
+        } -ArgumentList $Name,$PathToExecutable,$Arguments,$Credential
+
+    } else {
+
+        return VBoxManage.exe guestcontrol $Name --username $Credential.UserName --password $usPassword run --exe $PathToExecutable -- $PathToExecutable $Arguments
+
+    }#if
+}
+
 function Submit-VirtualBoxVMProcess
 {
     param(
@@ -216,20 +269,52 @@ function Submit-VirtualBoxVMProcess
         [string[]]$Arguments,
         [Parameter(Position=3)]
         [pscredential]$Credential
+
+    )
+    
+    if ($VirtualBoxVM) { $Name = $VirtualBoxVM.Name }
+    if ($Uuid) { $Name = $Uuid }
+
+    if (!$Credential) {
+        $sUserName = $env:USERNAME
+        $secPassword = Read-Host "Password for [$sUserName]" -AsSecureString
+        $Credential = New-Object pscredential($sUserName,$secPassword)
+    }#if
+
+    Invoke-VirtualBoxVMProcess -Name $Name -PathToExecutable $PathToExecutable -Arguments $Arguments -Credential $Credential -AsJob
+
+}
+
+function Invoke-VirtualBoxVMPowerShellScript
+{
+    param(
+        [Parameter(Position=0,ParameterSetName="Name")]
+        [string]$Name,
+        [Parameter(ParameterSetName="Uuid")]
+        [string]$Uuid,
+        [Parameter(Position=0,ParameterSetName="VirtualBoxVM",ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [VirtualBoxVM]$VirtualBoxVM,
+        [Parameter(Position=1,Mandatory=$true)]
+        [string]$ScriptBlock,
+        [Parameter(Position=3)]
+        [pscredential]$Credential,
+        [Parameter(Mandatory=$false)]
+        [switch]$AsJob
     )
 
     if ($VirtualBoxVM) { $Name = $VirtualBoxVM.Name }
     if ($Uuid) { $Name = $Uuid }
-    
-    if (!$Credential) {
-        $secPassword = Read-Host "Password" -AsSecureString
-        $Credential = New-Object pscredential($env:USERNAME,$secPassword)
-    }#if
 
-    $secPassword = $Credential.Password
-    $usPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPassword))
+    if ($AsJob) {
+
+        return Invoke-VirtualBoxVMProcess -Name $Name -PathToExecutable "cmd.exe" -Arguments "/c","powershell","-command",$ScriptBlock -Credential $Credential -AsJob
+
+    } else {
+
+        return Invoke-VirtualBoxVMProcess -Name $Name -PathToExecutable "cmd.exe" -Arguments "/c","powershell","-command",$ScriptBlock -Credential $Credential
+
+    }#if
     
-    return VBoxManage.exe guestcontrol $Name --username $Credential.UserName --password $usPassword run --exe $PathToExecutable -- $PathToExecutable $Arguments    
 }
 
 function Submit-VirtualBoxVMPowerShellScript
@@ -250,7 +335,5 @@ function Submit-VirtualBoxVMPowerShellScript
     if ($VirtualBoxVM) { $Name = $VirtualBoxVM.Name }
     if ($Uuid) { $Name = $Uuid }
 
-    return Submit-VirtualBoxVMProcess -Name $Name -PathToExecutable "cmd.exe" -Arguments "/c","powershell","-command",$ScriptBlock -Credential $Credential
-    
+    Invoke-VirtualBoxVMPowerShellScript -Name $Name -ScriptBlock $ScriptBlock -Credential $Credential -AsJob
 }
-
